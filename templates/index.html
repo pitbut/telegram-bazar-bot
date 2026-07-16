@@ -14,7 +14,9 @@
   body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh;}
   .wrap{max-width:720px;margin:0 auto;padding:16px 12px 60px;}
   h1{font-weight:800;letter-spacing:0.5px;font-size:22px;margin:0 0 2px;text-transform:uppercase;}
-  .role-badge{display:inline-block;background:var(--panel-2);color:var(--saffron);font-size:12px;padding:3px 10px;border-radius:12px;margin-bottom:10px;}
+  .members-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+  .member-chip{background:var(--panel-2);color:var(--saffron);font-size:12px;padding:3px 10px;border-radius:12px;}
+  .code-chip{background:var(--panel-2);color:var(--ink-dim);font-size:11px;padding:3px 10px;border-radius:12px;}
   .panel{background:var(--panel);border-radius:14px;padding:14px;border:1px solid var(--line);margin-bottom:14px;}
   .add-form{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;}
   .add-form input, .add-form select{background:var(--panel-2);border:1px solid var(--line);color:var(--ink);padding:9px 10px;border-radius:8px;font-size:14px;}
@@ -34,7 +36,7 @@
   .check.done{background:var(--leaf);border-color:var(--leaf);color:#fff;}
   .item .name{font-size:15px;font-weight:600;}
   .item .meta{font-size:12px;color:var(--ink-dim);margin-top:2px;}
-  .item .note-tag{display:inline-block;font-size:11px;background:var(--panel-2);color:var(--saffron);padding:2px 6px;border-radius:6px;margin-top:4px;}
+  .item .note-tag{display:inline-block;font-size:11px;background:var(--panel-2);color:var(--saffron);padding:2px 6px;border-radius:6px;margin-top:4px;margin-right:4px;}
   .item .price{font-weight:700;color:var(--saffron);min-width:70px;text-align:right;}
   .item .unplanned-tag{font-size:10px;background:var(--brick);color:#fff;padding:2px 6px;border-radius:6px;margin-left:6px;}
   .del-btn,.edit-btn{padding:4px 8px;font-size:12px;}
@@ -49,15 +51,19 @@
   .status-msg.under{background:#d3e3d2;color:#1f4a1e;}
   .status-msg.flat{background:#e2ddcb;color:#4a4433;}
   .loading{color:var(--ink-dim);font-size:13px;padding:20px;text-align:center;}
+  .error{color:var(--brick);font-size:14px;padding:20px;text-align:center;}
   details summary{cursor:pointer;color:var(--ink-dim);font-size:13px;margin-top:8px;}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>🛒 Список на базар</h1>
-  <div class="role-badge" id="role-badge"></div>
+  <div class="members-row" id="members-row"></div>
 
   <div id="loading" class="loading">Загрузка...</div>
+  <div id="no-code" class="error" style="display:none;">
+    Открой это приложение через бота (кнопка 🛒 или /list) — без кода семьи список работать не может.
+  </div>
 
   <div id="content" style="display:none;">
     <div class="panel">
@@ -75,7 +81,7 @@
         <button class="btn" type="submit">Добавить</button>
       </form>
       <div class="actions-row">
-        <button class="btn secondary" id="btn-notify">📨 Отправить мужу</button>
+        <button class="btn secondary" id="btn-notify">📨 Уведомить всех</button>
         <button class="btn secondary" id="btn-unplanned">+ Внеплановая покупка</button>
         <button class="btn danger" id="btn-finish">Завершить поход</button>
       </div>
@@ -98,26 +104,43 @@
 const tgApp = window.Telegram ? window.Telegram.WebApp : null;
 if (tgApp) { tgApp.ready(); tgApp.expand(); }
 
-const ROLE = "{{ role }}";
-document.getElementById('role-badge').textContent = ROLE === 'wife' ? 'Вы: жена' : 'Вы: муж';
+const params = new URLSearchParams(window.location.search);
+const CODE = "{{ code }}";
+const tgUser = (tgApp && tgApp.initDataUnsafe && tgApp.initDataUnsafe.user) ? tgApp.initDataUnsafe.user : null;
+const MY_ID = tgUser ? tgUser.id : null;
+const MY_NAME = tgUser ? (tgUser.first_name || "Я") : "Я";
 
 const fmt = n => (Math.round(n*100)/100).toLocaleString('ru-RU');
-let state = { trip: null, items: [] };
+let state = { trip: null, items: [], members: [] };
 
 async function api(path, method='GET', body=null){
+  const sep = path.includes('?') ? '&' : '?';
   const opts = { method, headers: {'Content-Type':'application/json'} };
   if(body) opts.body = JSON.stringify(body);
-  const res = await fetch(path, opts);
+  const res = await fetch(`${path}${sep}code=${encodeURIComponent(CODE)}`, opts);
   return res.json();
 }
 
 async function load(){
+  if(!CODE){
+    document.getElementById('loading').style.display='none';
+    document.getElementById('no-code').style.display='block';
+    return;
+  }
   const data = await api('/api/trip');
   state.trip = data.trip;
   state.items = data.items;
+  state.members = data.members || [];
   document.getElementById('loading').style.display='none';
   document.getElementById('content').style.display='block';
+  renderMembers();
   render();
+}
+
+function renderMembers(){
+  const row = document.getElementById('members-row');
+  row.innerHTML = `<span class="code-chip">код: ${CODE}</span>` +
+    state.members.map(m=>`<span class="member-chip">${escapeHtml(m.name)}</span>`).join('');
 }
 
 function escapeHtml(s){ const d=document.createElement('div'); d.innerText=s||''; return d.innerHTML; }
@@ -147,7 +170,10 @@ function render(){
       <div style="flex:1;">
         <div class="name">${escapeHtml(it.name)}${it.unplanned?'<span class="unplanned-tag">внепланово</span>':''}</div>
         <div class="meta">${it.qty} ${it.unit||'шт'} × ${fmt(it.planned_price)}</div>
-        ${it.location ? `<div class="note-tag">📍 ${escapeHtml(it.location)}</div>` : ''}
+        <div>
+          ${it.location ? `<span class="note-tag">📍 ${escapeHtml(it.location)}</span>` : ''}
+          ${it.added_by ? `<span class="note-tag">добавил: ${escapeHtml(it.added_by)}</span>` : ''}
+        </div>
       </div>
       <div class="price">${fmt(it.qty*it.planned_price)}</div>
       <button class="btn secondary del-btn" data-del="${it.id}">🗑</button>
@@ -167,6 +193,7 @@ function render(){
         <div style="flex:1;">
           <div class="name">${escapeHtml(it.name)}${it.unplanned?'<span class="unplanned-tag">внепланово</span>':''}</div>
           <div class="meta">${it.actual_qty} ${it.unit||'шт'} × ${fmt(it.actual_price)}</div>
+          ${it.bought_by ? `<span class="note-tag">купил(а): ${escapeHtml(it.bought_by)}</span>` : ''}
         </div>
         <div class="price">${fmt((it.actual_qty||0)*(it.actual_price||0))}</div>
         <button class="btn secondary edit-btn" data-edit="${it.id}">✎</button>
@@ -207,7 +234,7 @@ document.getElementById('add-form').addEventListener('submit', async e=>{
   const price = parseFloat(String(fd.get('price')||'0').replace(',','.'))||0;
   const unit = fd.get('unit');
   const location = String(fd.get('location')||'').trim();
-  await api('/api/items','POST',{name, qty, unit, plannedPrice:price, location});
+  await api('/api/items','POST',{name, qty, unit, plannedPrice:price, location, addedBy: MY_NAME});
   e.target.reset();
   e.target.qty.value=1;
   await load();
@@ -215,7 +242,7 @@ document.getElementById('add-form').addEventListener('submit', async e=>{
 
 async function markBought(id){
   const item = state.items.find(i=>i.id===id);
-  await api(`/api/items/${id}`,'PATCH',{bought:1, actualQty:item.qty, actualPrice:item.planned_price});
+  await api(`/api/items/${id}`,'PATCH',{bought:1, actualQty:item.qty, actualPrice:item.planned_price, boughtBy: MY_NAME, actorChatId: MY_ID});
   await load();
 }
 async function unmarkBought(id){
@@ -251,24 +278,24 @@ document.getElementById('btn-unplanned').onclick=async ()=>{
   if(qtyStr===null) return;
   const price = parseFloat(String(priceStr).replace(',','.'))||0;
   const qty = parseFloat(String(qtyStr).replace(',','.'))||1;
-  await api('/api/items','POST',{name, qty, unit:'шт', plannedPrice:0, unplanned:true});
+  await api('/api/items','POST',{name, qty, unit:'шт', plannedPrice:0, unplanned:true, addedBy: MY_NAME});
   const created = await api('/api/trip');
   const newItem = created.items.find(i=>i.name===name && !i.bought);
   if(newItem){
-    await api(`/api/items/${newItem.id}`,'PATCH',{bought:1, actualQty:qty, actualPrice:price});
+    await api(`/api/items/${newItem.id}`,'PATCH',{bought:1, actualQty:qty, actualPrice:price, boughtBy: MY_NAME, actorChatId: MY_ID});
   }
   await load();
 };
 
 document.getElementById('btn-notify').onclick=async ()=>{
-  await api('/api/notify-husband','POST');
-  alert('Список отправлен мужу в Telegram.');
+  await api('/api/notify','POST',{actorChatId: MY_ID, actorName: MY_NAME});
+  alert('Уведомление отправлено остальным участникам.');
 };
 
 document.getElementById('btn-finish').onclick=async ()=>{
   const remaining = state.items.filter(i=>!i.bought).length;
   if(remaining>0 && !confirm(`Не куплено ещё ${remaining} поз. Завершить поход всё равно?`)) return;
-  const res = await api('/api/finish','POST');
+  const res = await api('/api/finish','POST',{actorChatId: MY_ID});
   alert(`Поход завершён.\nПлан: ${fmt(res.planned)}\nФакт: ${fmt(res.actual)}\nРазница: ${res.diff>0?'+':''}${fmt(res.diff)}`);
   await load();
 };

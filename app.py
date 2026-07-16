@@ -92,6 +92,9 @@ def set_menu_button(chat_id, role):
         chat_id=chat_id,
         menu_button={"type": "web_app", "text": "🛒 Список", "web_app": {"url": url}},
     )
+
+
+def role_chat_ids(db, role):
     return [r["chat_id"] for r in db.execute("SELECT chat_id FROM users WHERE role=?", (role,)).fetchall()]
 
 

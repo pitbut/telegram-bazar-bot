@@ -246,7 +246,24 @@ def api_finish():
     db.commit()
     diff = actual - planned
     verdict = "перерасход на" if diff > 0 else "экономия"
-    text = f"✅ Поход завершён.\nПлан: {planned:.0f}\nФакт: {actual:.0f}\n{verdict} {abs(diff):.0f}"
+
+    bought_items = [i for i in items if i["bought"]]
+    not_bought = [i for i in items if not i["bought"]]
+
+    lines = []
+    for i in bought_items:
+        line = f"✅ {i['name']} — {i['actual_qty']} {i['unit'] or 'шт'} × {i['actual_price']:.0f} = {(i['actual_qty'] or 0)*(i['actual_price'] or 0):.0f}"
+        if i["unplanned"]:
+            line += " (внепланово)"
+        lines.append(line)
+    for i in not_bought:
+        lines.append(f"❌ {i['name']} — не куплено")
+
+    text = (
+        "✅ Поход завершён.\n\n"
+        + "\n".join(lines)
+        + f"\n\nПлан: {planned:.0f}\nФакт: {actual:.0f}\n{verdict} {abs(diff):.0f}"
+    )
     for chat_id in role_chat_ids(db, "wife"):
         tg("sendMessage", chat_id=chat_id, text=text)
     return jsonify(ok=True, planned=planned, actual=actual, diff=diff)

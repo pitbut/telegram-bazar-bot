@@ -85,7 +85,13 @@ def get_open_trip(db):
     return row
 
 
-def role_chat_ids(db, role):
+def set_menu_button(chat_id, role):
+    url = f"{APP_URL}/app?role={role}"
+    tg(
+        "setChatMenuButton",
+        chat_id=chat_id,
+        menu_button={"type": "web_app", "text": "🛒 Список", "web_app": {"url": url}},
+    )
     return [r["chat_id"] for r in db.execute("SELECT chat_id FROM users WHERE role=?", (role,)).fetchall()]
 
 
@@ -115,6 +121,7 @@ def webhook():
             row = db.execute("SELECT role FROM users WHERE chat_id=?", (chat_id,)).fetchone()
             role = row["role"] if row else "husband"
             url = f"{APP_URL}/app?role={role}"
+            set_menu_button(chat_id, role)
             tg(
                 "sendMessage",
                 chat_id=chat_id,
@@ -129,11 +136,13 @@ def webhook():
         if data == "role_wife":
             db.execute("INSERT OR REPLACE INTO users(chat_id, role) VALUES (?, 'wife')", (chat_id,))
             db.commit()
-            tg("sendMessage", chat_id=chat_id, text="Готово! Собирай список командой /list")
+            set_menu_button(chat_id, "wife")
+            tg("sendMessage", chat_id=chat_id, text="Готово! Список открывается кнопкой 🛒 у поля ввода сообщения (слева от скрепки).")
         elif data == "role_husband":
             db.execute("INSERT OR REPLACE INTO users(chat_id, role) VALUES (?, 'husband')", (chat_id,))
             db.commit()
-            tg("sendMessage", chat_id=chat_id, text="Готово! Список будет приходить сюда. Открыть сейчас: /list")
+            set_menu_button(chat_id, "husband")
+            tg("sendMessage", chat_id=chat_id, text="Готово! Список открывается кнопкой 🛒 у поля ввода сообщения (слева от скрепки).")
         tg("answerCallbackQuery", callback_query_id=cb["id"])
 
     return jsonify(ok=True)
@@ -196,6 +205,16 @@ def api_update_item(item_id):
         values.append(item_id)
         db.execute(f"UPDATE items SET {', '.join(fields)} WHERE id=?", values)
         db.commit()
+
+    just_bought = "bought" in data and str(data["bought"]) in ("1", "True", "true")
+    if just_bought:
+        item = db.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
+        if item:
+            subtotal = (item["actual_qty"] or 0) * (item["actual_price"] or 0)
+            text = f"🛒 Куплено: {item['name']} — {item['actual_qty']} {item['unit'] or 'шт'} × {item['actual_price']:.0f} = {subtotal:.0f}"
+            for chat_id in role_chat_ids(db, "wife"):
+                tg("sendMessage", chat_id=chat_id, text=text)
+
     return jsonify(ok=True)
 
 
